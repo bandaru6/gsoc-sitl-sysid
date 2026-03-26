@@ -8,7 +8,7 @@
 - **Email:** bandaru6@illinois.edu
 - **GitHub:** github.com/bandaru6
 - **University:** University of Illinois Urbana-Champaign
-- **Major:** B.S. Computer Science + B.S. Statistics (Dual Degree)
+- **Major:** B.S. Computer Science + B.S. Statistics (Dual Degree), Minor in Math and Economics
 - **GPA:** 3.83 / 4.0
 - **Year:** Sophomore (2nd year by summer 2026)
 - **Location:** Fremont, CA (summer)
@@ -27,17 +27,17 @@ and train autonomy algorithms on a regular computer without hardware. But there 
 fundamental problem: the physics models SITL uses are generic defaults, not tuned to any
 specific vehicle.
 
-To be concrete: a 5-inch racing quad and a heavy X8 octocopter fly completely differently in
-the real world, but SITL treats them nearly the same with default parameters. The result is
-a simulation that does not represent the real vehicle, which defeats the purpose of
+To be concrete: a 5-inch racing quad and a heavy X8 octocopter fly completely differently
+in the real world, but SITL treats them nearly the same with default parameters. The result
+is a simulation that does not represent the real vehicle — which defeats the purpose of
 simulation-based testing and introduces false confidence in algorithms validated only in
 simulation.
 
 **This project replaces manual parameter guessing with a data-driven pipeline.** Given a
 real ArduPilot DataFlash flight log, the tool estimates key vehicle dynamics and sensor
-parameters using grey-box system identification, and outputs two files: an updated SITL JSON
-frame model and a SIM_* sensor parameter file. From a developer's perspective: run one
-command on your flight log, get a SITL model that behaves like your vehicle.
+parameters using grey-box system identification, and outputs two files: an updated SITL
+JSON frame model and a SIM_* sensor parameter file. From a developer's perspective: run
+one command on your flight log, get a SITL model that behaves like your vehicle.
 
 Both outputs are directly loadable into ArduPilot's existing SITL infrastructure via
 sim_vehicle.py and MAVProxy — no custom simulator required, no manual tuning needed.
@@ -47,9 +47,15 @@ richest possible dataset for parameter estimation.
 
 ArduPilot already has investment in this direction: SYSID mode documentation explicitly
 lists "generating mathematical models for model generation" as a primary use case, and
-ArduPilot ships a MATLAB/Simulink workflow (including scripts like `sid_pre.m` that read
+ArduPilot ships MATLAB/Simulink workflows (including scripts like `sid_pre.m` that read
 SYSID DataFlash logs) for controller and plant modeling. This project builds the
 Python-native, open-source equivalent — integrated directly with ArduPilot tooling.
+
+**Scope Clarification:** This project targets **multicopters only** (quadrotor, hex,
+octocopter). No fixed-wing or helicopter support is included in core or extended
+deliverables. All abstractions are designed for future extension but not implemented
+during GSoC. This focus is intentional: doing one vehicle type correctly is more valuable
+than doing four vehicle types poorly.
 
 ![Pipeline Architecture](docs/figures/fig1_pipeline.png)
 
@@ -57,14 +63,22 @@ Python-native, open-source equivalent — integrated directly with ArduPilot too
 
 ```mermaid
 flowchart LR
-  A[DataFlash .bin log] --> B[Stage 1\nLog Parser]
-  B --> C[Stage 2\nSegment Selector]
-  C --> D[Stage 3\nDynamics Optimizer]
-  D --> E[Stage 4\nSensor Estimator]
-  E --> F1[JSON Frame Model]
-  E --> F2[SIM_* .parm File]
-  F1 --> G[Validation\nHarness]
+  A["DataFlash Log\n.bin  ·  real flight"]:::input --> B["Stage 1 · Log Parser\npymavlink DFReader\nTime alignment\nSegment detection"]:::s1
+  B --> C["Stage 2 · Segment Selector\nHover windows\nRate steps\nSYSID chirp windows"]:::s2
+  C --> D["Stage 3 · Dynamics Optimizer\nGrey-box NLLS\nInertia · drag · thrust\nConfidence intervals"]:::s3
+  D --> E["Stage 4 · Sensor Estimator\nIMU bias + noise\nScale factors\n.parm writer"]:::s4
+  D --> F1["JSON Frame Model\nmass · inertia\ndisc_area · mdrag_coef\nSITL-compatible"]:::out
+  E --> F2["SIM_* .parm File\nACC_BIAS · GYR_BIAS\nACC_RND · GYR_RND\nMAVProxy loadable"]:::out
+  F1 --> G["Validation\nRMS error · PSD\nCI metrics"]:::val
   F2 --> G
+
+  classDef input fill:#4A90D9,color:#fff,stroke:none
+  classDef s1    fill:#5BA55B,color:#fff,stroke:none
+  classDef s2    fill:#E8A838,color:#fff,stroke:none
+  classDef s3    fill:#9B59B6,color:#fff,stroke:none
+  classDef s4    fill:#E74C3C,color:#fff,stroke:none
+  classDef out   fill:#2C7BB6,color:#fff,stroke:none
+  classDef val   fill:#888888,color:#fff,stroke:none
 ```
 
 ---
@@ -95,6 +109,79 @@ flowchart LR
 
 ---
 
+## Developer Workflow (End-to-End)
+
+This is what a typical ArduPilot developer does with this tool:
+
+```bash
+# Step 1 — run a normal flight, collect a DataFlash log
+#           (or a SYSID-mode chirp flight for best results)
+
+# Step 2 — run the tool
+python3 log_to_model_params.py flight.bin --output-dir ./out --vehicle-type copter
+
+# Step 3 — load into SITL
+sim_vehicle.py -f JSON:./out/frame_model.json
+param load ./out/sim_sensors.parm
+
+# Step 4 — validate
+# tool generates side-by-side real vs simulated plots in ./out/validation/
+```
+
+Output files produced:
+- `frame_model.json` — drop-in replacement for ArduPilot's default multicopter frame JSON
+- `sim_sensors.parm` — MAVProxy-loadable SIM_* sensor parameters
+- `fit_report.txt` — parameter table, confidence intervals, identifiability warnings
+
+Target time from raw .bin to running SITL: **under 15 minutes**.
+
+The tool removes: manual parameter tuning, trial-and-error SITL calibration, and
+dependency on MATLAB/Simulink workflows. It does not introduce a new workflow — it
+**automates an existing one** that developers already do by hand.
+
+---
+
+## Why Developers Will Use This
+
+The adoption barrier for new developer tooling is high. This tool is designed to clear it:
+
+- **Uses existing artifacts:** DataFlash logs are already collected during normal development
+  flights — no special hardware, no dedicated calibration rig
+- **Outputs to existing workflows:** JSON and .parm files load directly into the SITL
+  infrastructure developers already use; no changes to ArduPilot core required
+- **Replaces MATLAB dependency:** ArduPilot's existing SYSID scripts require MATLAB/Simulink;
+  this project delivers a fully open-source Python alternative
+- **Fails informatively:** when the data is insufficient to estimate a parameter, the tool
+  tells the developer what flight maneuver to fly to fix it — rather than returning
+  a misleading value
+
+The goal is not a research prototype. It is a tool that makes a developer's Tuesday better.
+
+---
+
+## Integration Plan
+
+The tool is designed to integrate cleanly into ArduPilot's existing ecosystem with no
+changes to the core codebase:
+
+**Initial location:** `Tools/autotest/log_to_model_params.py` or `Tools/scripts/`,
+consistent with ArduPilot's existing Python tooling directory conventions. Exact placement
+to be confirmed with mentor during community bonding.
+
+**Design principles:**
+- No changes required to SITL core, SIM_Frame.cpp, or sim_vehicle.py
+- JSON schema aligned with SIM_Frame.cpp field names and units (already verified)
+- .parm output format compatible with standard `param load` MAVProxy command
+- CLI interface consistent with other ArduPilot Python tools
+
+**Future integration opportunities (post-GSoC):**
+- Reference multicopter model JSONs contributed to ArduPilot/SITL_Models
+- Parser improvements contributed upstream to pymavlink
+- Potential complementary use with ArduPilot/WebTools SysID browser tool for
+  visual validation alongside the parameter export this project produces
+
+---
+
 ## Alternate Projects
 
 If SITL Model Generation were not available, I would consider the AI-Assisted Log Diagnosis
@@ -121,45 +208,25 @@ statistical model to data — with the added complexity that the model is a nonl
 of differential equations, the data is noisy and irregularly sampled, and some parameters
 are unidentifiable from a given dataset.
 
-This is exactly the kind of problem I find genuinely interesting. My Statistics degree is not
-just coursework for me; it is a lens through which I see engineering problems. When I read
-about system identification, I see maximum likelihood estimation. When I look at IMU bias,
-I see a latent variable that needs to be inferred. When I think about parameter confidence
-intervals, I am thinking about what the Fisher information matrix tells us about how much
-useful information the flight data actually contains.
+This is exactly the kind of problem I find genuinely interesting. My Statistics degree is
+not just coursework for me; it is a lens through which I see engineering problems. When I
+read about system identification, I see maximum likelihood estimation. When I look at IMU
+bias, I see a latent variable that needs to be inferred. When I think about parameter
+confidence intervals, I am thinking about what the Fisher information matrix tells us about
+how much useful information the flight data actually contains.
 
 I also enjoy problems where the hard part is not writing a model, but figuring out whether
-the data actually justifies the conclusion. That is what identifiability analysis is: a formal
-answer to "can we even estimate this from what we have?" This project needs that kind of
-thinking at every stage.
-
-**Why I am already operating in this space**
-
-I work as an undergraduate researcher at UIUC's BLENDER Lab, where I build simulation
-evaluation infrastructure for autonomous driving. My work involves:
-
-- Writing C++ simulation components that replay real-world driving scenarios in a
-  physics-based simulator
-- Building trajectory rollout engines that compare predicted futures to ground truth
-- Designing counterfactual scenario generation pipelines for causal inference
-- Implementing evaluation metrics that measure how well simulated behavior matches
-  real-world behavior — the same meta-problem this project addresses
-
-The throughline to this proposal is direct: I have spent the last year thinking carefully
-about sim-to-real gaps, how to quantify them, and what causes them. I have already built
-the evaluation and comparison infrastructure that this project also requires. I am not
-starting from scratch — I am applying the same pattern of thinking in a new domain.
-
-I have also built production-quality tooling in this context: reproducible pipelines,
-CI-guarded regression tests, and documented interfaces designed for a lab of multiple
-contributors. That engineering discipline carries directly into the deliverables here.
+the data actually justifies the conclusion. That is what identifiability analysis is: a
+formal answer to "can we even estimate this from what we have?" This project needs that
+kind of thinking at every stage, and I am excited to refine the approach with mentor
+feedback throughout the summer.
 
 **Pre-application work**
 
 Before writing this proposal, I did the following:
 
-1. Set up the ArduPilot SITL environment locally and ran sim_vehicle.py with a custom
-   JSON frame model to verify the loading mechanism end-to-end
+1. Set up the ArduPilot SITL environment locally and ran sim_vehicle.py with a custom JSON
+   frame model to verify the loading mechanism end-to-end
 2. Read through SIM_Frame.cpp and SIM_Frame.h to catalog all JSON-loadable parameters
    and understand how ArduPilot computes thrust, drag, and rotational forces in simulation
 3. Read the SYSID mode documentation to understand the chirp injection workflow and
@@ -181,14 +248,13 @@ All code is at: github.com/bandaru6/gsoc-sitl-sysid
 
 **Research that shaped the design**
 
-Burri et al. (2020), "Identification of the Propeller Coefficients and Dynamic Parameters of
-a Hovering Quadrotor From Flight Data" (IEEE RA-L) — the closest prior work to this project.
-Their segmented grey-box optimization approach using short flight windows is the structural
-baseline for Stage 3, and their parameter set maps almost directly onto ArduPilot's JSON
-fields.
+Burri et al. (2020), "Identification of the Propeller Coefficients and Dynamic Parameters
+of a Hovering Quadrotor From Flight Data" (IEEE RA-L) — the closest prior work to this
+project. Their segmented grey-box optimization approach is the structural baseline for
+Stage 3, and their parameter set maps almost directly onto ArduPilot's JSON fields.
 
 Tedaldi et al. (2014), "A Robust and Easy to Implement Method for IMU Calibration Without
-External Equipment" (ICRA) — the static calibration method here directly informs Stage 4:
+External Equipment" (ICRA) — the static calibration method directly informs Stage 4:
 pre-arm stationary windows for bias estimation, flight windows for noise characterization.
 
 Torrente et al. (2021), "Data-Driven MPC for Quadrotors" (IEEE RA-L, IROS) — demonstrates
@@ -205,27 +271,54 @@ uncertainty. Chapters 7 and 14 directly inform the uncertainty quantification in
 
 The project is five sequential processing stages. Every stage has a clear input, a clear
 output, and can be tested independently. Partial progress is always useful: a working parser
-is valuable even without a working optimizer. The pipeline is designed to **degrade
-gracefully** — if a parameter cannot be reliably estimated from the available data, the tool
-will explicitly flag it with a plain-language warning rather than returning a misleading value.
-The tool never silently fails.
+is valuable even without a working optimizer.
 
 ![Optimizer Loop](docs/figures/fig4_optimizer.png)
 
-**Algorithm stack (staged by complexity):**
+*Mermaid alternative (renders natively on GitHub):*
+
+```mermaid
+flowchart LR
+  A["Flight Log\n.bin DataFlash\nCTUN · IMU · RCOU"]:::input --> B["Physics Model\nRigid body\nthrust + drag"]:::model
+  B --> C["Residual\nsim(θ) − real\nacross windows"]:::residual
+  C --> D["Optimizer\nscipy NLLS\nHuber loss"]:::optimizer
+  D -->|"Update θ until\nresidual minimized"| B
+  D --> E["Output\nθ* = inertia,\ndrag, thrust, ..."]:::output
+
+  classDef input    fill:#4A90D9,color:#fff,stroke:none
+  classDef model    fill:#5BA55B,color:#fff,stroke:none
+  classDef residual fill:#E8A838,color:#fff,stroke:none
+  classDef optimizer fill:#9B59B6,color:#fff,stroke:none
+  classDef output   fill:#2C7BB6,color:#fff,stroke:none
+```
+
+**Algorithm stack:**
 
 *Baseline (core deliverable):*
-- Robust NLLS with bounded constraints and Huber/soft-L1 loss for outlier robustness
-- MAP regularization (priors on parameters) for under-excited regimes where the data
-  cannot uniquely constrain all parameters
-- Gauss-Newton approximate Hessian for confidence intervals; bootstrap for empirical CIs
-- Cross-validation across log windows (fit on N-1, evaluate on held-out window)
+- Robust NLLS with physical bounds and Huber/soft-L1 loss for outlier robustness
+- MAP regularization with priors centered at typical ArduPilot vehicle ranges, for
+  under-excited regimes where the data cannot uniquely constrain all parameters
+- Gauss-Newton approximate Hessian for CIs; bootstrap resampling for empirical CIs
+- Cross-validation across log windows
 
 *Advanced (stretch):*
-- EKF/UKF augmented-state parameter refinement (offline replay)
 - Frequency-domain transfer function comparison for SYSID chirp validation, complementing
-  the existing ArduPilot WebTools SysID browser tool (which outputs transfer functions and
-  state space models and could be used for visual validation alongside this pipeline)
+  the existing ArduPilot WebTools SysID browser tool
+
+**Failure modes and behavior:**
+
+The tool is designed to never fail silently. Specific guarantees:
+
+| Condition | Tool behavior |
+|-----------|--------------|
+| Parameter unidentifiable from available data | Excluded from optimization; ArduPilot default retained; fit report flags with plain-language warning and recommended flight maneuver |
+| Key log message type missing | Specific warning emitted; affected parameter groups listed; pipeline continues on available data |
+| Log file corrupt or unreadable | Clear error with actionable message; no partial output written |
+| Optimizer does not converge | Default returned; convergence diagnostic included in report |
+
+The tool never returns NaN, never outputs unconstrained parameters silently, and never
+crashes on missing messages. These are not nice-to-haves — they are the minimum requirement
+for a tool that developers will actually trust.
 
 ### Stage 1: Log Parser and Time Alignment
 
@@ -245,45 +338,29 @@ and multiple IMU instances.
   maneuver (inertia), forward-flight (drag), SYSID chirp (if SID messages present)
 - Reject windows with EKF health failures, GPS dropouts, excessive vibration (VIBE), or
   insufficient signal excitation
-- YAML-based message selection configuration; designed for multicopters first with
-  abstractions for future extension to other vehicle types
 
-**If key messages are absent:** the stage emits a specific warning identifying which message
-type is missing and which parameter groups are unavailable as a result.
-
-**Milestone 1:** Parser handles ≥3 different .bin logs across ≥2 firmware versions. Segment
-detector correctly identifies hover windows on ≥2 real logs.
+**Milestone 1:** Parser handles ≥3 different .bin logs across ≥2 firmware versions.
+Segment detector correctly identifies hover windows on ≥2 real logs.
 
 ### Stage 2: Segment Selector
 
-**What it does:** Not all parts of a flight are equally useful. A hover segment tells you a
-lot about hover throttle but almost nothing about rotational inertia. A sharp rate step tells
-you about inertia but not drag at speed. SYSID chirp logs are the richest possible source,
-with rich controlled excitation designed specifically for identification. This stage finds
-the windows most informative for each parameter group.
+**What it does:** Not all parts of a flight are equally useful. A hover segment tells you
+about hover throttle but not rotational inertia. A sharp rate step tells you about inertia
+but not drag at speed. SYSID chirp logs are the richest possible source — with controlled
+excitation designed specifically for identification. This stage finds the windows most
+informative for each parameter group.
 
 **Key details:**
 - Classify each window as pre-arm static, hover, rate step, forward-flight, or SYSID chirp
 - Compute excitation quality score per window; rank and select top N per parameter group
 - Condition number check on regressor matrix to assess identifiability from each window
-- SYSID chirp detection via SID messages: extracts injection axis, sweep frequency range,
-  and aligned IMU response windows
 
 ### Stage 3: Grey-Box Dynamics Optimizer
 
-**What it does:** Find the physics parameters that make the simulation most closely reproduce
-what the real vehicle did. Grey-box means we keep the known physics structure and only
-estimate the unknown coefficients — so results map directly to ArduPilot JSON fields
-(verified against SIM_Frame.cpp) and remain physically interpretable.
-
-**Key details:**
-- scipy.optimize.least_squares with Huber/soft-L1 loss for outlier robustness
-- Staged optimization: hoverThrOut from hover median (closed-form), rotational inertia
-  from rate step windows (NLLS), mdrag_coef from forward-flight transitions (NLLS)
-- Physical bounds on all parameters; soft Gaussian priors for regularization
-- Gauss-Newton Hessian for CIs; bootstrap resampling for empirical CIs
-- Condition number and correlation diagnostics: parameters with poor identifiability are
-  flagged with plain-language warnings, not silently estimated
+**What it does:** Find the physics parameters that make the simulation most closely
+reproduce what the real vehicle did. Grey-box means we keep the known physics structure
+and only estimate the unknown coefficients — so results map directly to ArduPilot JSON
+fields and remain physically interpretable.
 
 **Parameter mapping to ArduPilot JSON fields:**
 
@@ -302,35 +379,29 @@ JSON output loads into SITL without errors via sim_vehicle.py.
 
 ### Stage 4: Sensor Parameter Estimator
 
-**What it does:** Even a perfect physics model will not match reality if the simulation uses
-wrong IMU characteristics. ArduPilot SITL exposes SIM_ACC*_BIAS, SIM_GYR*_BIAS,
+**What it does:** Even a perfect physics model will not match reality if the simulation
+uses wrong IMU characteristics. ArduPilot SITL exposes SIM_ACC*_BIAS, SIM_GYR*_BIAS,
 SIM_ACC*_RND, SIM_GYR*_RND, and SIM_ACC*_SCAL. This stage estimates them from the log.
 
-**Key details:**
-- Pre-arm static windows: accelerometer deviation from expected gravity gives ACC_BIAS;
-  gyroscope mean gives GYR_BIAS
-- Steady hover: signal variance gives noise proxy for ACC_RND and GYR_RND
-- Scale estimation where flight profile supports it; skipped with explicit warning otherwise
+- Pre-arm static windows: accelerometer deviation from expected gravity → ACC_BIAS;
+  gyroscope mean → GYR_BIAS
+- Steady hover variance → noise proxy for ACC_RND and GYR_RND
+- Scale estimation where flight profile supports it; explicit warning otherwise
 
 **Milestone 3:** Sensor parameters estimated within physically reasonable range on ≥2 logs.
-Full CLI runs end-to-end in under 60 seconds on a typical 5-minute log.
+Full CLI runs end-to-end in under 60 seconds.
 
 ### Stage 5: Output Writers and Validation Harness
 
-**What it does:** Write all estimated parameters to files ArduPilot SITL can use, close the
-loop with a validation harness comparing the fitted model to held-out data, and produce a
-fit report a developer can act on.
+**What it does:** Write all parameters to files ArduPilot SITL can use, validate the
+fitted model against held-out data, and produce a fit report a developer can act on.
 
-**Key details:**
-- JSON serialization aligned to SIM_Frame field names and units verified against
-  SIM_Frame.cpp; loaded into live SITL to verify end-to-end compatibility
-- MAVProxy .parm format writer; parameters loadable via `param load` in standard SITL workflow
-- Fit report: parameter table, CIs, identifiability warnings, validation metrics, usage guide
-- Validation runner: replay fitted model in SITL against held-out log segments; compare to
+- JSON aligned to SIM_Frame field names and units (verified against SIM_Frame.cpp)
+- .parm writer compatible with `param load` MAVProxy command
+- Fit report: parameter table, CIs, identifiability warnings, validation metrics
+- Validation runner: replay fitted model in SITL against held-out segments; compare to
   real log and ArduPilot defaults; generate side-by-side comparison plots
-- pytest + GitHub Actions CI with full pipeline regression test on a sample log
-- Modular code structure with documented interfaces, designed so ArduPilot community
-  contributors can extend the tool after GSoC
+- pytest + GitHub Actions CI with full pipeline regression test
 
 ---
 
@@ -338,15 +409,15 @@ fit report a developer can act on.
 
 | Risk | Mitigation |
 |------|-----------|
-| Weak identifiability on available logs | Restrict estimates to high-confidence parameters; warn explicitly on others; prioritize SYSID logs |
-| Logs lack sufficient excitation for inertia | Shift primary validation to SYSID-mode or synthetic SITL logs with known ground truth |
-| Sensor scale estimation unsupported | Deliver bias and noise only; document what flight maneuver is needed for scale |
-| Cross-vehicle generality harder than expected | Focus on multicopters; document extension points for planes and helicopters |
-| JSON field mapping is broader than expected | Prioritize 5 highest-impact fields (hoverThrOut, inertia, drag, PWM range, bias) |
-| Scope slippage in later phases | 50-hour rolling buffer; each phase produces a usable standalone artifact |
+| Weak identifiability on available logs | Restrict to high-confidence parameters; warn explicitly; prioritize SYSID logs |
+| Logs lack sufficient excitation | Shift validation to SYSID-mode or synthetic SITL logs with known ground truth |
+| Sensor scale estimation unsupported | Deliver bias and noise only; document required flight maneuver |
+| Cross-vehicle generality harder than expected | Multicopter-only; document extension points |
+| JSON field mapping broader than expected | Prioritize 5 highest-impact fields first |
+| Scope slippage | 50-hour rolling buffer; each phase produces standalone usable artifact |
 
-If deliverables must be reduced, the order is: stretch → extended → core. The core five
-deliverables are the minimum definition of success.
+Reduction order if needed: stretch → extended → core. Core five deliverables are the
+minimum definition of success.
 
 ---
 
@@ -359,119 +430,61 @@ deliverables are the minimum definition of success.
 - Read and annotated SIM_Frame.cpp and SIM_Frame.h to map all JSON-loadable fields
 - Read the SYSID mode documentation; understood SID message format and IMU averaging
 - Written and tested log_to_model_params.py: a working DataFlash parser producing a
-  SITL-compatible JSON from a real .bin log (hoverThrOut = 0.387, propExpo = 0.8),
-  with correct old/new format handling
+  SITL-compatible JSON (hoverThrOut = 0.387, propExpo = 0.8) from a real .bin log
 - Posted on the ArduPilot GSoC forum to introduce myself and get mentor feedback
-- Identified pymavlink issue #1033 (parameter message handling in mavlogdump.py) as
-  a scoped, directly relevant contribution to begin building a contribution record
+- Identified pymavlink issue #1033 as a scoped upstream contribution to begin before
+  coding starts
 
 All code is public at github.com/bandaru6/gsoc-sitl-sysid.
 
 ### Community Bonding (May 8 to June 1, not counted in 350 hours)
 
-- Sync with the mentor on: which parameter groups are highest priority, whether ordinary or
-  SYSID-mode logs should be the primary development baseline, where the tooling should live
-  in the ArduPilot repository structure, and what quantitative targets are realistic given
-  available log datasets
+- Sync with mentor on: highest-priority parameter groups, preferred log baseline (ordinary
+  vs SYSID), repository location, and quantitative targets realistic for available datasets
 - Identify 3–5 real flight logs to use as development baselines; confirm with mentor
 - Complete and submit pymavlink issue #1033 fix as a PR
-- Set up GitHub Actions CI: lint (flake8), unit tests (pytest), sample log regression test
-- Review existing ArduPilot system identification tooling (issue #22704, ArduPilot's
-  existing MATLAB SYSID scripts) and document gaps this project fills
+- Set up GitHub Actions CI: lint, unit tests, sample log regression test
+- Review ArduPilot's existing SYSID tooling (issue #22704, MATLAB scripts) and document
+  gaps this project fills
 - Milestone: mentor alignment confirmed, CI running, upstream contribution in review
+
+**Communication plan:** Weekly sync with mentor, mid-week async updates via GitHub issues
+or PR comments, early PRs per stage (not one large PR at the end).
 
 ### Phase 1: Log Parser and Time Alignment (Weeks 1–3, 70 hours)
 
-**Overview:** Build the data layer all subsequent stages depend on. Robustness is the
-priority — every later stage is only as good as the data it receives.
-
-**Tasks:**
-- Extend existing parser to handle all relevant message types across firmware versions
-- Time alignment: resample all streams to configurable common timebase
-- Flight phase detection: pre-arm, hover, maneuver, forward-flight, SYSID chirp
-- Quality filters: EKF health, GPS, VIBE, excitation checks
+- Extend parser to handle all relevant message types across firmware versions
+- Time alignment, flight phase detection, quality filters
 - Unit tests on both synthetic and real .bin logs
-
-**Milestone 1 (end of Week 3):**
-- Parser handles ≥3 different .bin logs covering ≥2 firmware versions without error
-- Segment detector identifies hover windows correctly on ≥2 real logs
-- All unit tests passing in CI
+- **Milestone 1:** ≥3 logs parsed; ≥2 firmware versions; CI passing
 
 ### Phase 2: Dynamics Model and Parameter Optimizer (Weeks 4–6, 80 hours)
 
-**Overview:** Implement the grey-box multirotor dynamics model and staged nonlinear least
-squares optimizer. The forward model mirrors ArduPilot's SIM_Frame physics so fitted
-parameters write directly to JSON without unit conversion.
-
-**Tasks:**
-- Forward dynamics model: thrust curve, body drag, Newton-Euler rotational dynamics,
-  motor lag (first-order filter)
-- Map every model parameter to its ArduPilot JSON field; verify by loading into live SITL
-- Staged optimizer: hoverThrOut (closed-form), rotational inertia (NLLS on rate steps),
-  mdrag_coef (NLLS on forward-flight transitions)
+- Forward dynamics model mirroring SIM_Frame.cpp physics exactly
+- Staged optimizer: hoverThrOut (closed-form), inertia (NLLS), mdrag_coef (NLLS)
 - Physical bounds on all parameters; JSON writer
-
-**Milestone 2 (end of Week 6):**
-- Forward model reproduces ArduPilot SITL physics within 5% on synthetic SITL-generated
-  logs (ground truth known)
-- Optimizer converges on ≥2 real logs with physically plausible values
-- JSON output loads into SITL without errors
+- **Milestone 2:** Forward model within 5% of SITL on synthetic logs; JSON loads in SITL
 
 ### Phase 3: Uncertainty Quantification and Identifiability Diagnostics (Weeks 7–8, 70 hours)
 
-**Overview:** The optimizer produces point estimates without uncertainty. This phase adds
-the statistical layer that makes the tool trustworthy. If someone provides a hover-only log
-and asks for an inertia estimate, the tool should not silently return an unconstrained
-number — it should warn the user exactly what flight data is needed to fix it.
-
-**Tasks:**
-- Gauss-Newton approximate Hessian for covariance estimation
-- Bootstrap CIs (100–200 resamples across log windows)
-- Condition number and pairwise correlation diagnostics
-- MAP regularization with soft priors for under-excited regimes
-- Plain-language identifiability warnings in the fit report
-
-**Milestone 3 (end of Week 8):**
-- CIs computed for all parameters on ≥2 real logs
-- Identifiability warnings correctly trigger on hover-only logs for inertia parameters
-- Optimizer stable across 5 different test logs (no NaN, no divergence)
+- Gauss-Newton Hessian + bootstrap CIs
+- Condition number and correlation diagnostics
+- MAP regularization; plain-language warnings in fit report
+- **Milestone 3:** CIs on ≥2 logs; warnings trigger correctly on hover-only logs
 
 ### Phase 4: Sensor Parameter Estimation and Full CLI (Weeks 9–10, 40 hours)
 
-**Overview:** Extend the pipeline to estimate IMU sensor parameters and integrate everything
-into a single CLI. At the end of this phase, the complete tool is functional.
-
-**Tasks:**
-- Pre-arm static window detection; ACC and GYR bias estimation
-- Noise estimation from hover windows; scale estimation where flight profile supports it
-- .parm file writer in MAVProxy format
-- fit_report.txt: parameter table, CIs, validation metrics, identifiability warnings
-- Single CLI entry point: `python3 log_to_model_params.py flight.bin --output-dir ./out`
-
-**Milestone 4 (end of Week 10):**
-- Full CLI produces JSON + .parm + fit_report.txt in under 60 seconds on a typical
-  5-minute log
-- All output files load into SITL without errors
+- ACC/GYR bias and noise estimation
+- .parm writer; fit_report.txt; single CLI entry point
+- **Milestone 4:** Full CLI end-to-end in under 60 seconds
 
 ### Phase 5: Validation Harness, Documentation, and SYSID Polish (Weeks 11–12, 40 hours)
 
-**Overview:** Close the loop with a rigorous validation harness and complete documentation.
-
-**Tasks:**
-- Validation runner: replay fitted model in SITL against held-out segments; compare to
-  real log and ArduPilot defaults; generate side-by-side comparison plots
-- Regression tests in CI: assert full pipeline on sample log produces metrics better than
-  default parameters
-- Complete documentation: quick-start runbook, API reference, output parameter explanations,
-  recommended flight profile, troubleshooting guide
-- SYSID polish: dedicated SID message parsing, frequency-domain validation metrics
-
-**Milestone 5 (end of Week 12):**
-- Validation shows measurable RMS attitude error reduction vs. default parameters on
-  held-out segments from ≥2 real logs (exact thresholds confirmed with mentor during
-  community bonding based on available datasets)
-- Regression tests passing in CI
-- Documentation complete: developer can follow runbook in under 15 minutes
+- Validation runner: held-out segments vs real log and defaults; comparison plots
+- Regression tests in CI
+- Complete documentation: runbook, API reference, troubleshooting guide
+- SYSID polish: dedicated SID message parsing, frequency-domain metrics
+- **Milestone 5:** Measurable error reduction on ≥2 logs; runbook usable in under 15 min
 
 ### Timeline Summary
 
@@ -486,7 +499,7 @@ gantt
   axisFormat %b %d
 
   section Bonding
-  Mentor sync + CI + upstream PR        :done, 2026-05-08, 24d
+  Mentor sync · CI · upstream PR        :done, 2026-05-08, 24d
 
   section Phase 1 · Log Parser
   DataFlash parser + segment detection  :2026-06-01, 21d
@@ -506,19 +519,16 @@ gantt
 
 ![Hours Distribution](docs/figures/fig5_hours.png)
 
-| Phase | Weeks | Hours | Key Deliverable | Quantitative Milestone |
-|-------|-------|-------|-----------------|----------------------|
+| Phase | Weeks | Hours | Key Deliverable | Milestone |
+|-------|-------|-------|-----------------|-----------|
 | Community Bonding | Pre-coding | (not counted) | Mentor sync, CI, upstream PR | pymavlink fix submitted |
 | 1: Log Parser | 1–3 | 70h | Robust parser + segment detection | 3 logs parsed; CI passing |
 | 2: Dynamics Model | 4–6 | 80h | Grey-box optimizer + JSON writer | JSON loads in SITL |
-| 3: Uncertainty | 7–8 | 70h | CIs + identifiability diagnostics | Warnings trigger on hover-only logs |
-| 4: Sensor + CLI | 9–10 | 40h | IMU bias/noise + full CLI | End-to-end in under 60s |
-| 5: Validation + Docs | 11–12 | 40h | Validation harness + runbook | Measurable error reduction vs default |
-| Buffer | Rolling | 50h | Risk mitigation, mentor feedback | Absorbed per phase as needed |
-| **Total** | **12 weeks** | **350h** | **End-to-end toolchain** | **All core milestones met** |
-
-Each phase produces a standalone usable artifact. Reducing weekly hours later in the project
-extends the timeline without breaking the pipeline or losing prior work.
+| 3: Uncertainty | 7–8 | 70h | CIs + identifiability diagnostics | Warnings on hover-only logs |
+| 4: Sensor + CLI | 9–10 | 40h | IMU bias/noise + full CLI | End-to-end < 60s |
+| 5: Validation + Docs | 11–12 | 40h | Validation harness + runbook | Measurable error reduction |
+| Buffer | Rolling | 50h | Risk mitigation, mentor feedback | Per phase as needed |
+| **Total** | **12 weeks** | **350h** | **End-to-end toolchain** | **All core milestones** |
 
 ---
 
@@ -528,21 +538,17 @@ extends the timeline without breaking the pipeline or losing prior work.
 
 | Metric | Definition | Target |
 |--------|-----------|--------|
-| RMS attitude error | Mean angular distance between real and simulated attitude (degrees) | Measurable reduction vs ArduPilot defaults; exact threshold confirmed with mentor |
-| RMS body-rate error | RMS of angular rate residual (rad/s) | Stable reduction across hover and maneuver segments |
+| RMS attitude error | Mean angular distance between real and simulated attitude (°) | Measurable reduction vs ArduPilot defaults; threshold confirmed with mentor |
+| RMS body-rate error | RMS of angular rate residual (rad/s) | Stable reduction across hover and maneuver |
 | RMS acceleration error | RMS of body-frame accel residual (m/s²) | Reduced on hover and forward-flight |
 | PSD mismatch | Welch PSD distance between fitted sim and real acceleration | Reduced frequency-domain mismatch |
-| Frequency-domain fit | Bode magnitude/phase error vs SYSID chirp data (when available) | Reduced transfer-function mismatch |
-| CI coverage | Fraction of parameters with finite confidence intervals | 100% on SYSID-mode logs |
-| Cross-log generalization | Validation error increase when fitting on log A, testing on log B | Bounded; no worse than 20% degradation |
+| Frequency response | Bode magnitude/phase error vs SYSID chirp data (when available) | Reduced transfer-function mismatch |
+| CI coverage | Fraction of parameters with finite CIs | 100% on SYSID-mode logs |
+| Cross-log generalization | Validation error increase when fitting on log A, testing on log B | No worse than 20% degradation |
 
-I will benchmark against ArduPilot default parameters as the baseline on the same held-out
-segments. Exact numerical improvement targets will be confirmed with the mentor during
-community bonding once we have established baseline performance on the agreed log datasets.
-Quantitative claims in this proposal are intentionally stated as "measurable reduction"
-rather than hard numbers because I have not yet run the baseline experiments — I expect to
-do that during community bonding and would rather give the mentor accurate numbers than
-impressive-sounding guesses.
+Exact numerical improvement targets will be confirmed with the mentor during community
+bonding, once baseline performance is established on the agreed log datasets. I am
+deliberately not citing hard numbers I haven't measured yet.
 
 **Pipeline robustness:**
 - No NaN outputs or divergence on any valid ArduPilot .bin log
@@ -550,8 +556,7 @@ impressive-sounding guesses.
 - Identifiability warnings fire correctly on under-excited logs
 
 **Datasets:**
-- Primary: 3–5 publicly available .bin logs from the ArduPilot forum and test suite,
-  covering ≥2 vehicle configurations
+- Primary: 3–5 publicly available .bin logs from the ArduPilot forum and test suite
 - Ground truth: synthetic SITL-generated logs with known parameters (rigorous accuracy test)
 - SYSID: chirp logs from mentor if available; otherwise generated via SITL SYSID mode
 
@@ -559,25 +564,21 @@ impressive-sounding guesses.
 
 ## Technical Skills
 
-**Python:** My primary language with three years of research-grade use including
-optimization scripts, time-series analysis, and pipeline engineering. I use numpy and scipy
-daily — specifically scipy.optimize.least_squares (including trust-region-reflective and
-Levenberg-Marquardt backends), condition number computation, and Jacobian-based covariance
-estimation. Extensive pandas experience for time-series data.
+**Python:** Three years of research-grade and production use including scipy.optimize
+(least_squares with trust-region-reflective and Levenberg-Marquardt backends), condition
+number computation, Jacobian-based covariance estimation, numpy, pandas for time-series.
 
-**C++:** Two years of experience including ongoing work writing simulation components and
-trajectory rollout code at BLENDER Lab. I can read and navigate the ArduPilot C++
-codebase — I have already done so for SIM_Frame.cpp and related files.
+**C++:** Two years including production C++ simulation components at BLENDER Lab and for
+the Virtual Driver Evaluation System. I can navigate the ArduPilot C++ codebase — I have
+already done so for SIM_Frame.cpp.
 
-**Other tools:** Git (daily use), GitHub Actions CI, pymavlink (used in existing parser),
-pytest, matplotlib for scientific visualization.
+**Production tooling:** Docker, Kubernetes, AWS, GitHub Actions CI/CD, pytest, pymavlink,
+matplotlib for scientific visualization.
 
-**For this project specifically, already completed before this proposal:**
-- Set up ArduPilot SITL build environment; verified sim_vehicle.py with custom JSON
-- Written and tested a working DataFlash .bin parser with correct output on a real log
-- Read SIM_Frame.cpp to understand the exact JSON field semantics and units
-- Fixed old-format vs new-format TimeMS/TimeUS and ThO scaling issues in the parser
-- Produced hoverThrOut = 0.387 and propExpo = 0.8 from a real flight log
+**For this project specifically, already completed:**
+- Working DataFlash .bin parser with correct output on a real log (hoverThrOut = 0.387)
+- Read SIM_Frame.cpp to understand JSON field semantics and units
+- Old/new format TimeMS/TimeUS and ThO scaling handled correctly in existing code
 
 ---
 
@@ -587,37 +588,22 @@ pytest, matplotlib for scientific visualization.
 
 github.com/bandaru6/gsoc-sitl-sysid/blob/main/Tools/scripts/log_to_model_params.py
 
-This script parses a real ArduPilot DataFlash .bin log, extracts hoverThrOut from CTUN.ThO
-(with normalization for both log format versions), propExpo from MOT_THST_EXPO, PWM range
-from RCOU messages, and battery parameters from BAT messages. It outputs a SITL-compatible
-JSON frame model. Tested on a real .bin log; produces hoverThrOut = 0.387, propExpo = 0.8.
-The old/new format compatibility handling (get_timestamp() helper) is a real engineering
-problem encountered and solved during pre-application work.
+Parses a real ArduPilot DataFlash .bin log, extracts all key fields, outputs a
+SITL-compatible JSON. Tested on a real .bin log; produces hoverThrOut = 0.387,
+propExpo = 0.8. The old/new format compatibility handling is a real engineering problem
+encountered and solved during pre-application work.
 
 ---
 
-## Open Source Experience and Ecosystem
+## Open Source Experience
 
-My open-source contribution history is recent but concrete. Before submitting this proposal:
-working parser tested on real data, CI infrastructure set up, engagement with the mentor on
-the ArduPilot forum, and a scoped upstream fix (pymavlink #1033) planned for community
-bonding.
+Before submitting this proposal: working parser tested on real data, CI infrastructure set
+up, engagement with the mentor on the ArduPilot forum, and pymavlink issue #1033 fix
+planned for community bonding — a scoped, directly relevant upstream contribution.
 
 I have been a close reader of the relevant ArduPilot codebase: sim_vehicle.py, SIM_Frame.cpp
-and SIM_Frame.h, the DataFlash log message reference, the SYSID mode documentation, and open
-issues related to system identification (#22704) and logging (#15656). I have also reviewed
-the ArduPilot WebTools SysID browser tool, which provides transfer function and state space
-outputs from SYSID logs and is a natural visual complement to the parameter export this
-project produces.
-
-**Collaboration opportunities in the ecosystem:**
-
-This project sits naturally adjacent to several active ArduPilot-adjacent repositories. I
-plan to align output formats with ArduPilot/WebTools (complementing, not duplicating, its
-transfer function outputs), contribute parser improvements back to pymavlink, and provide
-reference model JSONs or generation tooling that could be included under SITL_Models. These
-are not necessary for GSoC success but represent the natural next contributions after core
-deliverables are complete.
+and SIM_Frame.h, the DataFlash log message reference, SYSID mode documentation, and open
+issues #22704 and #15656. I have also reviewed the ArduPilot WebTools SysID browser tool.
 
 I want to be a contributor to ArduPilot, not just a GSoC student. After GSoC I plan to
 extend cross-vehicle support, richer SYSID frequency-domain validation, and upstream
@@ -628,40 +614,92 @@ utilities to the ArduPilot tools directory.
 ## Background and Education
 
 - **University:** University of Illinois Urbana-Champaign
-- **Major:** B.S. Computer Science + B.S. Statistics (dual degree)
+- **Major:** B.S. Computer Science + B.S. Statistics (Dual Degree), Minor in Math and Economics
 - **Year:** Sophomore (2 years completed by summer 2026)
 - **GPA:** 3.83 / 4.0
 - **Relevant coursework:** Computational Linear Algebra, Statistical Computing, Applied
-  Machine Learning, Data Structures and Algorithms, Probability Theory, Numerical Methods
+  Machine Learning, Algorithms, Database Systems, Probability Theory, Numerical Methods
 
-**Research Experience:**
+**Core Alignment: Simulation, Evaluation, and Causal Inference**
 
 I work as an undergraduate researcher at UIUC's BLENDER Lab, building simulation evaluation
-infrastructure for autonomous driving. My work involves:
+infrastructure for autonomous agents. My work includes designing counterfactual simulation
+pipelines for causal inference — given a real driving scenario, what would have happened
+under a different policy decision? — and implementing evaluation metrics that measure how
+well simulated behavior matches real-world observations.
 
-- Writing C++ simulation components that replay real-world driving scenarios in a
-  physics-based simulator
-- Building trajectory rollout engines that generate predicted futures and compare them to
-  ground truth
-- Designing counterfactual scenario generation pipelines for causal inference
-- Implementing evaluation metrics that measure how well simulated behavior matches
-  real-world behavior
+I have also built the **Virtual Driver Evaluation System**, a large-scale autonomous driving
+evaluation pipeline with core C++ simulation components, fault-tolerant distributed
+processing, trajectory rollout engines, and evaluation workflows designed for thousands of
+synthetic scenarios in production-like testing settings. The engineering discipline required
+here — correctness at scale, replay support, fault tolerance, CI-guarded regression testing
+— carries directly into the SITL calibration toolchain.
 
-This is not adjacent experience — I already operate at the interface of simulation realism,
-trajectory rollout, model evaluation, and real-world comparison. The problem structure is
-the same. The domain is different.
+The problem structure is identical to SITL calibration: does the simulation faithfully
+reproduce real dynamics, and how do we measure that quantitatively? I am not applying this
+thinking to a new domain for the first time. I have been working on this meta-problem for
+over a year.
 
-I am working with my advisor toward a contribution on simulation evaluation methodology for
-autonomous systems. I would be interested in co-authoring a paper about automated SITL
-calibration from flight logs if the mentor is open to it.
+**Production Engineering Experience**
+
+Beyond research, I have built production-grade data and ML systems where reliability,
+scalability, and correctness are non-negotiable:
+
+At **Google**, I am architecting and deploying the AI Interviewing Insight Platform on GCP
+using FastAPI, Pub/Sub, Cloud SQL, and Kubernetes-orchestrated distributed pipelines to
+automate ingestion, transcription, and Gemini-based NLP analysis across 100+ interviews.
+This involves real-time data ingestion pipelines, distributed processing, and
+BigQuery→Looker dashboard automation — the same categories of engineering concerns that
+apply to a robust SITL calibration tool that must process real-world flight logs reliably
+and produce outputs developers can trust.
+
+At **Palantir** (Winter 2024 Fellow), I deployed AI-powered data pipelines and agentic
+workflows in Foundry AIP, building distributed cloud-native orchestration for structured
+entity extraction from unstructured documents, and RAG-based semantic search pipelines.
+The core challenge — transforming noisy, unstructured real-world data into structured,
+actionable outputs with strict correctness requirements — is directly analogous to what
+this project does with flight logs.
+
+At **Impacter AI**, I engineered backend features for a cloud-native ML platform with
+Python (Flask), Docker, Terraform, and AWS CI/CD, including MLOps practices and
+load-tested monitoring for systems serving 1K+ active campaigns.
+
+At **OTCR** (Office of Technical Consulting and Research at UIUC), I built a secure
+Django/PostgreSQL internal dashboard for 100+ users with GitHub Actions CI/CD — the same
+workflow practices this project's regression test suite will use.
+
+Across these roles I have consistently built:
+- Data ingestion pipelines with strict correctness requirements under real-world noise
+- Distributed systems with CI/CD, monitoring, and fault-tolerant execution
+- ML pipelines integrated into production environments
+- Reproducible, testable workflows designed for teams, not just solo use
+
+**Why My Background Fits This Project Specifically**
+
+This project sits at the intersection of three areas I already work in daily:
+
+1. **Simulation and evaluation** (BLENDER Lab, Virtual Driver Evaluation System): measuring
+   sim-to-real gaps, designing held-out validation pipelines, building C++ simulation
+   components, designing for fault tolerance and scale
+2. **Statistical modeling and optimization** (Statistics degree, coursework, practice):
+   least squares, parameter estimation, uncertainty analysis, identifiability — the formal
+   tools this project's optimizer is built on
+3. **Production data systems** (Google, Palantir, Impacter, OTCR): building reliable
+   pipelines that ingest real-world data, handle noise and missing values, and produce
+   correct, reproducible, actionable outputs
+
+The key challenge in this project is not just estimating parameters — it is ensuring the
+system behaves correctly under real-world constraints: noisy logs, missing messages, partial
+identifiability, and the requirement that outputs load cleanly into an existing simulator.
+I have experience building exactly this type of system, and I am excited to bring that
+experience to the ArduPilot ecosystem.
 
 ---
 
 ## GSoC Experience
 
-I have not participated in a previous Google Summer of Code.
-
-I am applying only to this project.
+I have not participated in a previous Google Summer of Code. I am applying only to this
+project.
 
 **Why GSoC:**
 
@@ -678,16 +716,16 @@ ArduPilot powers hundreds of thousands of vehicles worldwide. Its SITL simulator
 virtually every ArduPilot developer for testing and validation. A tool that makes SITL more
 faithful to real vehicles has a multiplier effect across the entire ecosystem.
 
-But beyond scale: ArduPilot is the right platform for this project because of its mature
-SITL infrastructure, active SYSID mode with time-synchronized log data specifically designed
-for model generation, and the real-world flight log corpus available for development. This
-is a place where a parameter estimation tool can become something the community actually
-uses in their daily workflow — not a research prototype that sits in a GitHub repo. The fact
-that ArduPilot already ships MATLAB SYSID scripts and has open issues about this exact
-problem tells me the community wants this and has been thinking about it.
+Beyond scale: ArduPilot is the right platform for this project because of its mature SITL
+infrastructure, active SYSID mode with time-synchronized log data designed for model
+generation, and the real-world flight log corpus available for development. The fact that
+ArduPilot already ships MATLAB SYSID scripts and has open issues about automated parameter
+estimation tells me the community wants this and has been thinking about it. This is a
+place where a calibration tool can become something developers actually use — not a research
+prototype that sits in a GitHub repo.
 
-I intend to keep contributing after GSoC. Cross-vehicle support, richer SYSID validation,
-and upstreaming utilities to the tools directory are the natural next steps.
+I intend to keep contributing after GSoC: cross-vehicle support, richer SYSID frequency-
+domain validation, and upstreaming utilities to the ArduPilot tools directory.
 
 ---
 
@@ -696,31 +734,30 @@ and upstreaming utilities to the tools directory are the natural next steps.
 - **Location:** Fremont, CA (summer)
 - **Availability:** 30 hours per week as the baseline, with capacity to push harder during
   the optimizer and validation phases where my background is strongest
-- **Conflicts:** No summer classes. One 3–4 day family trip scheduled to avoid milestone
-  deadlines.
+- **Conflicts:** No summer classes. One 3–4 day family trip scheduled to avoid milestones.
 - **If a summer professional opportunity arises:** I would transition to the extended coding
   period at 15 hours per week, continuing into fall 2026, completing all deliverables by
-  end of calendar year 2026. The phased architecture is explicitly designed to support this:
-  each phase produces a standalone usable artifact, so reduced weekly hours extends the
-  timeline without breaking the pipeline or losing prior work. I am fully committed to
-  seeing this project through to completion regardless of timeline.
-- I plan to provide regular progress updates and share intermediate results early to ensure
-  alignment and incorporate mentor feedback throughout development.
+  end of calendar year 2026. The phased architecture is explicitly designed to support
+  this — each phase produces a standalone usable artifact, so reduced weekly hours extends
+  the timeline without breaking the pipeline. I am fully committed to seeing this project
+  through to completion regardless of timeline.
+- I will provide weekly progress updates and share intermediate results early to ensure
+  alignment and incorporate mentor feedback throughout.
 
 ---
 
 ## Coding Period
 
-I prefer the standard 12-week coding period. The 350-hour scope maps to 12 weeks at 25–30
-hours per week with a 50-hour rolling buffer for mentor feedback and unexpected blockers.
+I prefer the standard 12-week coding period. The 350-hour scope maps to 12 weeks at
+25–30 hours per week with a 50-hour rolling buffer.
 
 If the mentor prefers the extended timeline (up to 22 weeks at reduced hours), I am equally
-comfortable with that structure and would use the additional time for cross-vehicle testing,
-SYSID frequency-domain validation, and documentation improvements.
+comfortable with that structure and would use the additional time for cross-vehicle testing
+and SYSID frequency-domain validation.
 
 I expect to iterate on both scope and implementation details throughout based on mentor
-feedback, and I have structured the project so each stage can be adjusted without breaking
-the overall pipeline.
+feedback. I have structured the project so each stage can be adjusted without breaking the
+overall pipeline.
 
 ---
 
@@ -730,5 +767,5 @@ I have already written working code, read the relevant source files and papers, 
 the forum, and identified an upstream fix to contribute before the coding period starts —
 I am not applying to learn what SITL is, I am applying to spend 350 hours making it better.
 My Statistics degree means I will spend the hardest parts of this project not just writing
-an optimizer, but understanding when its output can be trusted and when the data simply does
-not contain enough information to estimate what we are asking for.
+an optimizer, but understanding when its output can be trusted and when the data simply
+does not contain enough information to estimate what we are asking for.

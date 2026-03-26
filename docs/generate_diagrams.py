@@ -21,7 +21,7 @@ os.makedirs(OUT, exist_ok=True)
 # FIGURE 1: Pipeline Architecture
 # ─────────────────────────────────────────────────────────────
 def fig_pipeline():
-    fig, ax = plt.subplots(figsize=(16, 7))
+    fig, ax = plt.subplots(figsize=(18, 8))
     ax.set_xlim(0, 16)
     ax.set_ylim(0, 7)
     ax.axis('off')
@@ -39,7 +39,7 @@ def fig_pipeline():
         'subtext':  '#333333',
     }
 
-    def box(ax, x, y, w, h, label, sublabel, color, fontsize=9):
+    def box(ax, x, y, w, h, label, sublabel, color, fontsize=11):
         rect = FancyBboxPatch((x, y), w, h,
                               boxstyle="round,pad=0.1",
                               facecolor=color, edgecolor='white',
@@ -49,7 +49,7 @@ def fig_pipeline():
                 ha='center', va='center', fontsize=fontsize,
                 fontweight='bold', color='white', zorder=4)
         ax.text(x + w/2, y + h*0.28, sublabel,
-                ha='center', va='center', fontsize=6.5,
+                ha='center', va='center', fontsize=8.5,
                 color='white', alpha=0.9, zorder=4, wrap=True)
 
     def arrow(ax, x1, x2, y):
@@ -95,11 +95,11 @@ def fig_pipeline():
 
     box(ax, 8.8, 1.1, 2.4, 1.5, 'JSON Frame Model',
         'mass, inertia\ndisc_area, mdrag_coef\nSITL-compatible',
-        COLORS['output'], fontsize=8)
+        COLORS['output'], fontsize=10)
 
     box(ax, 11.8, 1.1, 2.4, 1.5, 'SIM_* .parm File',
         'ACC_BIAS, GYR_BIAS\nACC_RND, GYR_RND\nMAVProxy loadable',
-        COLORS['output'], fontsize=8)
+        COLORS['output'], fontsize=10)
 
     # Validation loop arrow
     ax.annotate('', xy=(14.2, 3.5), xytext=(14.2, 5.5),
@@ -107,12 +107,12 @@ def fig_pipeline():
                                 lw=1.5, linestyle='dashed'), zorder=5)
     box(ax, 13.5, 5.5, 2.2, 1.0, 'Validation',
         'RMS error, PSD,\nCI metrics',
-        '#888888', fontsize=8)
+        '#888888', fontsize=10)
 
     ax.text(8.0, 6.6, 'SITL Model Generation Pipeline',
-            ha='center', fontsize=14, fontweight='bold', color='#222222')
+            ha='center', fontsize=16, fontweight='bold', color='#222222')
     ax.text(8.0, 6.1, 'ArduPilot DataFlash .bin log  ->  tuned SITL frame model + sensor parameters',
-            ha='center', fontsize=9, color='#555555', style='italic')
+            ha='center', fontsize=11, color='#555555', style='italic')
 
     plt.tight_layout()
     path = os.path.join(OUT, "fig1_pipeline.png")
@@ -125,7 +125,7 @@ def fig_pipeline():
 # FIGURE 2: Gantt Chart Timeline
 # ─────────────────────────────────────────────────────────────
 def fig_gantt():
-    fig, ax = plt.subplots(figsize=(18, 8))
+    fig, ax = plt.subplots(figsize=(20, 11))
     fig.patch.set_facecolor('#FAFAFA')
     ax.set_facecolor('#FAFAFA')
 
@@ -152,18 +152,18 @@ def fig_gantt():
     for i, (label, start, end, color) in enumerate(phases):
         y = n - i - 1
         bar_width = end - start
-        ax.barh(y, bar_width, left=start, height=0.68,
+        ax.barh(y, bar_width, left=start, height=0.82,
                 color=color, alpha=0.88, edgecolor='white', linewidth=1.5)
         # Show text only if bar is wide enough; otherwise use abbreviated label
         if bar_width >= 2:
-            fs = 10.5 if bar_width >= 3 else 9.5
+            fs = 12 if bar_width >= 3 else 11
             ax.text(start + bar_width / 2, y, label,
                     va='center', ha='center', fontsize=fs,
                     fontweight='bold', color='white', clip_on=True)
         else:
             # 1-week buffer bar — abbreviated label outside right edge
             ax.text(end + 0.1, y, label,
-                    va='center', ha='left', fontsize=8.5,
+                    va='center', ha='left', fontsize=10,
                     fontweight='bold', color='#888888')
 
     for week, label in milestones:
@@ -171,20 +171,20 @@ def fig_gantt():
                    linestyle='--', alpha=0.75, zorder=5)
         # Vertical label placed just to the right of the milestone line
         ax.text(week + 0.12, 0.35, label,
-                ha='left', va='bottom', fontsize=8,
+                ha='left', va='bottom', fontsize=10,
                 color='#CC3333', fontweight='bold',
                 rotation=90, rotation_mode='anchor')
 
     weeks = list(range(0, 17))
     week_labels = ['Bonding'] + [f'W{i}' for i in range(1, 17)]
     ax.set_xticks(weeks)
-    ax.set_xticklabels(week_labels, fontsize=9.5)
+    ax.set_xticklabels(week_labels, fontsize=11)
     ax.set_yticks([])
-    ax.set_xlim(0, 18.0)
-    ax.set_ylim(-0.5, n - 0.3)
-    ax.set_xlabel('Week', fontsize=11)
+    ax.set_xlim(0, 20.0)
+    ax.set_ylim(-0.6, n - 0.2)
+    ax.set_xlabel('Week', fontsize=13)
     ax.set_title('GSoC 2026 Development Timeline  (350 hours over 12 weeks)',
-                 fontsize=13, fontweight='bold', pad=14)
+                 fontsize=15, fontweight='bold', pad=14)
 
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -202,7 +202,7 @@ def fig_gantt():
 # ─────────────────────────────────────────────────────────────
 def fig_sim_real_gap():
     np.random.seed(42)
-    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 6))
     fig.patch.set_facecolor('#FAFAFA')
     t = np.linspace(0, 4*np.pi, 300)
 
@@ -210,10 +210,10 @@ def fig_sim_real_gap():
     ax = axes[0]
     real_signal = np.sin(t) * np.exp(-0.1*t) + 0.08 * np.random.randn(len(t))
     ax.plot(t, real_signal, color='#2C7BB6', lw=2, label='Real flight (IMU)')
-    ax.set_title('Real Vehicle\n(DataFlash .bin log)', fontweight='bold', fontsize=10)
-    ax.set_xlabel('Time (s)', fontsize=9)
-    ax.set_ylabel('Roll rate (rad/s)', fontsize=9)
-    ax.legend(fontsize=8)
+    ax.set_title('Real Vehicle\n(DataFlash .bin log)', fontweight='bold', fontsize=12)
+    ax.set_xlabel('Time (s)', fontsize=11)
+    ax.set_ylabel('Roll rate (rad/s)', fontsize=11)
+    ax.legend(fontsize=10)
     ax.set_facecolor('#F5F5F5')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -224,11 +224,11 @@ def fig_sim_real_gap():
     ax.plot(t, real_signal, color='#2C7BB6', lw=1.5, alpha=0.5, label='Real')
     ax.plot(t, default_sim, color='#E74C3C', lw=2, linestyle='--', label='Default SITL')
     ax.fill_between(t, real_signal, default_sim, alpha=0.15, color='#E74C3C')
-    ax.set_title('Default SITL Model\n(generic parameters, large gap)', fontweight='bold', fontsize=10)
-    ax.set_xlabel('Time (s)', fontsize=9)
-    ax.set_ylabel('Roll rate (rad/s)', fontsize=9)
-    ax.legend(fontsize=8)
-    ax.text(6, 0.8, 'Sim-to-real\ngap', color='#E74C3C', fontsize=9,
+    ax.set_title('Default SITL Model\n(generic parameters, large gap)', fontweight='bold', fontsize=12)
+    ax.set_xlabel('Time (s)', fontsize=11)
+    ax.set_ylabel('Roll rate (rad/s)', fontsize=11)
+    ax.legend(fontsize=10)
+    ax.text(6, 0.8, 'Sim-to-real\ngap', color='#E74C3C', fontsize=11,
             ha='center', fontweight='bold')
     ax.set_facecolor('#F5F5F5')
     ax.spines['top'].set_visible(False)
@@ -240,18 +240,18 @@ def fig_sim_real_gap():
     ax.plot(t, real_signal, color='#2C7BB6', lw=1.5, alpha=0.5, label='Real')
     ax.plot(t, fitted_sim, color='#5BA55B', lw=2, linestyle='--', label='Fitted SITL')
     ax.fill_between(t, real_signal, fitted_sim, alpha=0.1, color='#5BA55B')
-    ax.set_title('Fitted SITL Model\n(this project, small gap)', fontweight='bold', fontsize=10)
-    ax.set_xlabel('Time (s)', fontsize=9)
-    ax.set_ylabel('Roll rate (rad/s)', fontsize=9)
-    ax.legend(fontsize=8)
-    ax.text(6, 0.8, 'Reduced\ngap', color='#5BA55B', fontsize=9,
+    ax.set_title('Fitted SITL Model\n(this project, small gap)', fontweight='bold', fontsize=12)
+    ax.set_xlabel('Time (s)', fontsize=11)
+    ax.set_ylabel('Roll rate (rad/s)', fontsize=11)
+    ax.legend(fontsize=10)
+    ax.text(6, 0.8, 'Reduced\ngap', color='#5BA55B', fontsize=11,
             ha='center', fontweight='bold')
     ax.set_facecolor('#F5F5F5')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
     fig.suptitle('Sim-to-Real Gap: What This Project Fixes',
-                 fontsize=13, fontweight='bold')
+                 fontsize=15, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.94])
     path = os.path.join(OUT, "fig3_sim_real_gap.png")
     plt.savefig(path, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
@@ -263,9 +263,9 @@ def fig_sim_real_gap():
 # FIGURE 4: Optimization Loop
 # ─────────────────────────────────────────────────────────────
 def fig_optimizer():
-    fig, ax = plt.subplots(figsize=(13, 7.5))
+    fig, ax = plt.subplots(figsize=(15, 9))
     ax.set_xlim(0, 13)
-    ax.set_ylim(-1.0, 7.5)
+    ax.set_ylim(-1.2, 9.0)
     ax.axis('off')
     fig.patch.set_facecolor('#FAFAFA')
 
@@ -278,7 +278,7 @@ def fig_optimizer():
                               linewidth=2, zorder=3, alpha=0.9)
         ax.add_patch(rect)
         for i, line in enumerate(lines):
-            fs = 11 if i == 0 else 9
+            fs = 13 if i == 0 else 11
             fw = 'bold' if i == 0 else 'normal'
             ax.text(x + w/2, y + h - 0.22 - i*0.32, line,
                     ha='center', va='top', fontsize=fs,
@@ -289,41 +289,41 @@ def fig_optimizer():
                     arrowprops=dict(arrowstyle='->', color='#555',
                                    lw=1.8), zorder=5)
 
-    # Main boxes — raised to y=2.8 for headroom below
-    box(ax, 0.2, 2.8, 2.4, 1.8,
+    # Main boxes — raised to y=3.2 for headroom below
+    box(ax, 0.2, 3.2, 2.4, 1.8,
         ['Flight Log', '.bin DataFlash', 'CTUN, IMU, RCOU'], COLORS[0])
-    arr(ax, 2.6, 3.7, 3.2, 3.7)
+    arr(ax, 2.6, 4.1, 3.2, 4.1)
 
-    box(ax, 3.2, 2.8, 2.4, 1.8,
+    box(ax, 3.2, 3.2, 2.4, 1.8,
         ['Physics Model', 'Rigid body', 'thrust + drag'], COLORS[1])
-    arr(ax, 5.6, 3.7, 6.2, 3.7)
+    arr(ax, 5.6, 4.1, 6.2, 4.1)
 
-    box(ax, 6.2, 2.8, 2.4, 1.8,
+    box(ax, 6.2, 3.2, 2.4, 1.8,
         ['Residual', 'sim(θ) − real', 'across windows'], COLORS[2])
-    arr(ax, 8.6, 3.7, 9.2, 3.7)
+    arr(ax, 8.6, 4.1, 9.2, 4.1)
 
-    box(ax, 9.2, 2.8, 2.4, 1.8,
+    box(ax, 9.2, 3.2, 2.4, 1.8,
         ['Optimizer', 'scipy NLLS', 'Huber loss'], COLORS[3])
 
     # Feedback arc — curves BELOW the boxes; text sits well below the arc
-    ax.annotate('', xy=(4.4, 2.8), xytext=(10.4, 2.8),
+    ax.annotate('', xy=(4.4, 3.2), xytext=(10.4, 3.2),
                 arrowprops=dict(arrowstyle='->',
                                 connectionstyle='arc3,rad=-0.4',
                                 color='#E74C3C', lw=2.0,
                                 linestyle='dashed'), zorder=5)
     # Text placed below the arc (arc dips to ~y=1.4 at its lowest point)
-    ax.text(7.4, -0.55, 'Update θ until residual is minimized',
-            ha='center', va='center', fontsize=10, color='#E74C3C',
+    ax.text(7.4, -0.7, 'Update θ until residual is minimized',
+            ha='center', va='center', fontsize=12, color='#E74C3C',
             fontweight='bold', zorder=6)
 
     # Output box — top of figure
-    arr(ax, 10.4, 4.6, 10.4, 5.4)
-    box(ax, 9.2, 5.4, 2.4, 1.5,
+    arr(ax, 10.4, 5.0, 10.4, 6.0)
+    box(ax, 9.2, 6.0, 2.4, 1.8,
         ['Output', 'θ* = [inertia,', 'drag, thrust, ...]'],
         '#2C7BB6')
 
-    ax.text(6.5, 7.0, 'Grey-Box System Identification Loop',
-            ha='center', fontsize=13, fontweight='bold', color='#222')
+    ax.text(6.5, 8.5, 'Grey-Box System Identification Loop',
+            ha='center', fontsize=15, fontweight='bold', color='#222')
 
     plt.tight_layout()
     path = os.path.join(OUT, "fig4_optimizer.png")
@@ -336,7 +336,7 @@ def fig_optimizer():
 # FIGURE 5: Hours breakdown pie/bar
 # ─────────────────────────────────────────────────────────────
 def fig_hours():
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
     fig.patch.set_facecolor('#FAFAFA')
 
     phases = ['Log Parser\n(70h)', 'Dynamics Model\n(80h)',
@@ -350,36 +350,36 @@ def fig_hours():
         hours, labels=phases, colors=colors,
         autopct='%1.0f%%', startangle=140,
         pctdistance=0.72, labeldistance=1.18,
-        textprops={'fontsize': 9},
+        textprops={'fontsize': 11},
         wedgeprops={'edgecolor': 'white', 'linewidth': 1.5})
     for at in autotexts:
-        at.set_fontsize(9)
+        at.set_fontsize(11)
         at.set_color('white')
         at.set_fontweight('bold')
     ax1.set_title('Hours by Phase  (350h total)',
-                  fontweight='bold', fontsize=12)
+                  fontweight='bold', fontsize=14)
 
     # Stacked bar showing cumulative progress
     cumulative = np.cumsum([0] + hours)
     ax2.set_facecolor('#F5F5F5')
-    bar_h = 0.55
+    bar_h = 0.65
     for i in range(len(phases)):
         ax2.barh(0, hours[i], left=cumulative[i],
                  color=colors[i], height=bar_h, edgecolor='white', linewidth=1.2)
         if hours[i] >= 40:
             ax2.text(cumulative[i] + hours[i] / 2, 0,
                      f'{hours[i]}h', ha='center', va='center',
-                     fontsize=9.5, fontweight='bold', color='white')
+                     fontsize=11.5, fontweight='bold', color='white')
 
     week_markers = [0, 70, 150, 220, 260, 300, 350]
     week_labels  = ['Start', 'Wk3', 'Wk6', 'Wk8', 'Wk10', 'Wk12', 'End']
     ax2.set_xticks(week_markers)
-    ax2.set_xticklabels(week_labels, fontsize=10)
+    ax2.set_xticklabels(week_labels, fontsize=12)
     ax2.set_yticks([])
-    ax2.set_xlim(0, 370)
-    ax2.set_ylim(-0.5, 0.5)
-    ax2.set_xlabel('Cumulative Hours', fontsize=11)
-    ax2.set_title('Cumulative Work Distribution', fontweight='bold', fontsize=12)
+    ax2.set_xlim(0, 380)
+    ax2.set_ylim(-0.6, 0.6)
+    ax2.set_xlabel('Cumulative Hours', fontsize=13)
+    ax2.set_title('Cumulative Work Distribution', fontweight='bold', fontsize=14)
     ax2.spines['top'].set_visible(False)
     ax2.spines['right'].set_visible(False)
     ax2.spines['left'].set_visible(False)
